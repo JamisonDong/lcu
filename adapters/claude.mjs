@@ -19,13 +19,18 @@ import {
   createApprovalLogger,
   createCallTracker,
   isMainModule,
+  mergedToolDescriptor as claudeToolDescriptor,
   nativeAppApprovalOptions,
   nativeAppApprovalResponse,
   relayElicitation,
   restartFailedResult,
   selectedAppBuild,
+  TOP_LEVEL_COMBINATORS,
   TURN_END_TIMEOUT_MS,
 } from './client.mjs';
+
+/** The descriptor Claude gets for an original public tool (`mergedToolDescriptor`). */
+export { claudeToolDescriptor };
 import { crossTurnEnabled } from './cross-turn.mjs';
 import { openDiagnosticLog } from './diagnostics.mjs';
 import { declineAgentHostApp } from './host-guard.mjs';
@@ -108,7 +113,6 @@ function asError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-const TOP_LEVEL_COMBINATORS = ['oneOf', 'anyOf'];
 // The Claude API refuses a tool whose input schema has any of these at the top level.
 const API_REJECTED_COMBINATORS = ['oneOf', 'anyOf', 'allOf'];
 
@@ -125,36 +129,6 @@ function logPublicSchemas(log, upstreamTools, listedTools) {
     const left = API_REJECTED_COMBINATORS.filter(key => tool.inputSchema?.[key] !== undefined);
     if (left.length > 0) log.event('tool_schema_unsupported', { tool: tool.name, combinators: left });
   }
-}
-
-/**
- * The descriptor Claude gets for an original public tool. Claude Code leaves out an MCP tool whose input
- * schema has a top-level `oneOf` or `anyOf`, and the original `js` lists its two argument forms (`code`, or
- * `completion_summary` alone) under a top-level `oneOf`, so the model would get `js_reset` and no `js`. Such a
- * schema becomes one object with the properties of every form, requiring only what every form requires.
- * Calls still reach the original server unchanged, and it checks them against its own schema. Any other
- * descriptor is returned as it is.
- */
-export function claudeToolDescriptor(tool) {
-  const schema = tool.inputSchema;
-  const combinators = TOP_LEVEL_COMBINATORS.filter(key => Array.isArray(schema?.[key]));
-  if (combinators.length === 0) return tool;
-  const inputSchema = { ...schema, type: 'object', properties: { ...schema.properties } };
-  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-  for (const key of combinators) {
-    delete inputSchema[key];
-    const forms = schema[key].filter(form => form && typeof form === 'object');
-    for (const form of forms) {
-      for (const [name, property] of Object.entries(form.properties ?? {})) inputSchema.properties[name] ??= property;
-    }
-    const formRequired = forms.map(form => (Array.isArray(form.required) ? form.required : []));
-    for (const name of formRequired[0] ?? []) {
-      if (formRequired.every(names => names.includes(name))) required.add(name);
-    }
-  }
-  if (required.size > 0) inputSchema.required = [...required];
-  else delete inputSchema.required;
-  return { ...tool, inputSchema };
 }
 
 function requireTurnContext(value) {

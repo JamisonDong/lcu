@@ -9,7 +9,6 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
-  antigravityToolDescriptor,
   approvalHint,
   CONVERSATION_ID_META,
   controlDirectory,
@@ -81,42 +80,6 @@ test('Antigravity relay lists only the original js and js_reset with original in
     const result = await client.callTool({ name: 'turn_ended', arguments: {} });
     assert.equal(result.isError, true);
   });
-});
-
-test('antigravityToolDescriptor flattens top-level oneOf and anyOf schemas and leaves plain schemas unchanged', () => {
-  const plain = { name: 'js_reset', description: 'Reset', inputSchema: { type: 'object', properties: {}, additionalProperties: false } };
-  assert.equal(antigravityToolDescriptor(plain), plain);
-
-  const oneOfJs = {
-    name: 'js',
-    description: 'Run JS',
-    inputSchema: {
-      type: 'object',
-      properties: { code: { type: 'string' }, completion_summary: { type: 'string' } },
-      additionalProperties: false,
-      oneOf: [
-        { type: 'object', properties: { code: { type: 'string' }, timeout_ms: { type: 'integer' } }, required: ['code'], additionalProperties: false },
-        { type: 'object', properties: { completion_summary: { type: 'string' } }, required: ['completion_summary'], additionalProperties: false },
-      ],
-    },
-  };
-  const flattened = antigravityToolDescriptor(oneOfJs);
-  assert.equal('oneOf' in flattened.inputSchema, false);
-  assert.equal('required' in flattened.inputSchema, false);
-  assert.equal(flattened.inputSchema.additionalProperties, false);
-  assert.deepEqual(Object.keys(flattened.inputSchema.properties).sort(), ['code', 'completion_summary', 'timeout_ms']);
-
-  const sharedRequired = {
-    name: 'x',
-    inputSchema: {
-      type: 'object',
-      anyOf: [
-        { type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' } }, required: ['a', 'b'] },
-        { type: 'object', properties: { a: { type: 'string' }, c: { type: 'string' } }, required: ['a'] },
-      ],
-    },
-  };
-  assert.deepEqual(antigravityToolDescriptor(sharedRequired).inputSchema.required, ['a']);
 });
 
 test('SessionStart and PreInvocation inject original instructions once per conversation as injectSteps', unix, async () => {
