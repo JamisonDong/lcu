@@ -61,6 +61,17 @@ test('detect finds a harness by its executable, and DeepSeek Harness also by its
   assert.equal(setup.harnessInstalled('dsh', home, '/bin'), true);
 });
 
+test('detect finds Antigravity from any of its config or app directories even when agy is off PATH', (t) => {
+  override(t, setup.seams, 'which', () => null);
+  override(t, setup.seams, 'dshApps', () => []);
+  assert.deepEqual(setup.detect(temporary(t)), []);
+  for (const dir of ['.gemini/antigravity', '.gemini/antigravity-cli', '.gemini/antigravity-ide', '.gemini/config']) {
+    const home = temporary(t);
+    mkdirSync(join(home, dir), { recursive: true });
+    assert.deepEqual(setup.detect(home), ['antigravity'], dir);
+  }
+});
+
 test('OMP links a per-profile package that imports the adapter relatively, with the command and no skill', async (t) => {
   const f = fixture(t);
   for (const profile of ['blue', 'green']) {

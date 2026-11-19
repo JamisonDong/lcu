@@ -41,7 +41,8 @@ export const CLIENTS = {
   hermes: { label: 'Hermes', executable: 'hermes', detectPath: '.hermes', mcpAgent: '' },
   dsh: { label: 'DeepSeek Harness', executable: 'dsh', detectPath: '.dsh', mcpAgent: '' },
   junie: { label: 'Junie', executable: 'junie', detectPath: '.junie', mcpAgent: '' },
-  antigravity: { label: 'Antigravity', executable: 'agy', detectPath: '.gemini/antigravity', mcpAgent: '' },
+  antigravity: { label: 'Antigravity', executable: 'agy',
+    detectPath: ['.gemini/antigravity', '.gemini/antigravity-cli', '.gemini/antigravity-ide', '.gemini/config'], mcpAgent: '' },
 };
 export const ALIASES = { claude: 'claude-code', 'oh-my-pi': 'omp', 'hermes-agent': 'hermes', 'deepseek-harness': 'dsh', agy: 'antigravity' };
 // Harnesses whose native registration needs their own executable; Codex and Claude Code register through
@@ -912,7 +913,8 @@ function validateAgentScope(names, scope) {
 
 export const detect = (home) => Object.entries(CLIENTS)
   .filter(([name, client]) => (name === 'dsh' ? dshExecutable(home) : seams.which(client.executable)) ||
-    existsSync(join(home, client.detectPath))).map(([name]) => name);
+    (Array.isArray(client.detectPath) ? client.detectPath : [client.detectPath]).some((path) => existsSync(join(home, path))))
+  .map(([name]) => name);
 
 async function chooseAgents(home) {
   const detected = detect(home);
