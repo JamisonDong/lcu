@@ -831,6 +831,45 @@ test('Junie setup warns that approvals last until revoked and asks to continue u
   assert.ok(!run.err.includes('Junie'));
 });
 
+test('Antigravity setup supports agy alias, project scope, warning confirmation and --yes', async (t) => {
+  const answers = { crossTurn: 'n', apply: 'y', agy: 'n' };
+  const agyFixture = () => {
+    const f = interactiveFixture(t, answers);
+    override(t, setup.seams, 'ask', (q) => {
+      f.prompts.push(q);
+      return q === setup.ANTIGRAVITY_CONTINUE_QUESTION ? answers.agy : q === CROSS_TURN_QUESTION ? answers.crossTurn : answers.apply;
+    });
+    return f;
+  };
+  // Declined: Antigravity is skipped, the other harness is still registered.
+  let f = agyFixture();
+  let run = await f.raw('--agent', 'agy', '--agent', 'codex', '--no-chrome', '--cross-turn', 'off');
+  assert.equal(run.code, 0, run.err);
+  assert.ok(run.err.includes(setup.ANTIGRAVITY_APPROVAL_WARNING));
+  assert.deepEqual(f.prompts, [setup.ANTIGRAVITY_CONTINUE_QUESTION, 'Apply this setup? [y/N] ']);
+  assert.match(run.out, /Antigravity skipped/);
+  assert.deepEqual(f.registered.map((entry) => entry.names), [['codex']]);
+  // Declined alone: setup cancels without changing anything.
+  f = agyFixture();
+  run = await f.raw('--agent', 'antigravity', '--no-chrome', '--cross-turn', 'off');
+  assert.deepEqual(f.prompts, [setup.ANTIGRAVITY_CONTINUE_QUESTION]);
+  assert.match(run.out, /Cancelled; no agent configuration changed/);
+  assert.deepEqual(f.registered, []);
+  // Accepted with project scope: registered cleanly.
+  answers.agy = 'y';
+  f = agyFixture();
+  run = await f.raw('--agent', 'agy', '--scope', 'project', '--project', f.home, '--no-chrome', '--cross-turn', 'off');
+  assert.equal(run.code, 0, run.err);
+  assert.deepEqual(f.registered.map((entry) => [entry.names, entry.scope]), [[['antigravity'], 'project']]);
+  // --yes prints warning without prompting.
+  f = agyFixture();
+  run = await f.raw('--agent', 'antigravity', '--no-chrome', '--cross-turn', 'off', '--yes');
+  assert.equal(run.code, 0, run.err);
+  assert.ok(run.err.includes(setup.ANTIGRAVITY_APPROVAL_WARNING));
+  assert.deepEqual(f.prompts, []);
+  assert.deepEqual(f.registered.map((entry) => entry.names), [['antigravity']]);
+});
+
 test('the cross-turn question names per-app approvals only where they exist', () => {
   assert.match(question('darwin'), /Per-app approvals still apply\. \[y\/N\] $/);
   assert.match(question('win32'), /Per-app approvals still apply/);

@@ -15,7 +15,7 @@ import { install as installApprovalMod } from './claude_mod.mjs';
 import { install as hideHostOnlyTools } from './claude_visibility.mjs';
 import { accountHome, isFile, lstat, real, shellQuote } from './fsutil.mjs';
 import { approvalNote, question as crossTurnQuestion, readCrossTurn, setCrossTurn } from './cross_turn.mjs';
-import { configureDsh, configureHermes, configureJunie, configureOmp, DSH_DEFAULT_PROFILE, dshExecutable, validDshProfile } from './harness_setup.mjs';
+import { configureAntigravity, configureDsh, configureHermes, configureJunie, configureOmp, DSH_DEFAULT_PROFILE, dshExecutable, validDshProfile } from './harness_setup.mjs';
 import { withLock } from './lock.mjs';
 import { ask, say, warn } from './terminal.mjs';
 
@@ -41,10 +41,11 @@ export const CLIENTS = {
   hermes: { label: 'Hermes', executable: 'hermes', detectPath: '.hermes', mcpAgent: '' },
   dsh: { label: 'DeepSeek Harness', executable: 'dsh', detectPath: '.dsh', mcpAgent: '' },
   junie: { label: 'Junie', executable: 'junie', detectPath: '.junie', mcpAgent: '' },
+  antigravity: { label: 'Antigravity', executable: 'agy', detectPath: '.gemini/antigravity', mcpAgent: '' },
 };
-export const ALIASES = { claude: 'claude-code', 'oh-my-pi': 'omp', 'hermes-agent': 'hermes', 'deepseek-harness': 'dsh' };
+export const ALIASES = { claude: 'claude-code', 'oh-my-pi': 'omp', 'hermes-agent': 'hermes', 'deepseek-harness': 'dsh', agy: 'antigravity' };
 // Harnesses whose native registration needs their own executable; Codex and Claude Code register through
-// add-mcp and their config files, and Junie through its config files, without the CLI installed.
+// add-mcp and their config files, and Junie and Antigravity through their config files, without the CLI installed.
 const NEEDS_BINARY = ['pi', 'omp', 'hermes', 'dsh'];
 // Native harness plugins are profile-scoped, and Junie reads hooks only from the user's config; project scope is
 // unsupported.
@@ -553,6 +554,17 @@ export async function configure(names, home, command, toolsRoot, releaseRoot,
       try {
         const { mcpPath, configPath } = configureJunie(home, command, node, releaseRoot, { scope });
         say(`${client.label}: MCP server registered in ${mcpPath}; turn hooks in ${configPath}.`);
+      } catch (error) {
+        fail(name, 'MCP', error);
+        continue;
+      }
+      applyApproval(name);
+      continue;
+    }
+    if (name === 'antigravity') {
+      try {
+        const { mcpPath, hooksPath } = configureAntigravity(home, command, node, releaseRoot, { scope, project });
+        say(`${client.label}: MCP server registered in ${mcpPath}; turn hooks in ${hooksPath}.`);
       } catch (error) {
         fail(name, 'MCP', error);
         continue;
@@ -1123,6 +1135,11 @@ export const JUNIE_APPROVAL_WARNING = 'Warning: Junie can\'t show LCU\'s per-app
   'itself when it needs an app; each approval (Touch ID or password) allows that app until you revoke it with ' +
   '`lcu apps revoke <App>`. List allowed apps with `lcu apps`.';
 export const JUNIE_CONTINUE_QUESTION = 'Continue? [y/N] ';
+/** Printed by setup for Antigravity, never to a model: Antigravity CLI cancels LCU's per-app approval prompt. */
+export const ANTIGRAVITY_APPROVAL_WARNING = 'Warning: Antigravity CLI cancels LCU\'s per-app approval prompt. When Antigravity does not show an ' +
+  'approval prompt, it will run `lcu apps allow <App>` itself; each approval (Touch ID or password) allows that ' +
+  'app until you revoke it with `lcu apps revoke <App>`. List allowed apps with `lcu apps`.';
+export const ANTIGRAVITY_CONTINUE_QUESTION = 'Continue? [y/N] ';
 
 async function registerLocked(args, account, home, names, missing, register, paths) {
   const { releaseRoot, desktopCommand, directRuntime, toolsRoot, setupCommand, setupEnvironment, crossTurn } = paths;
@@ -1187,7 +1204,8 @@ async function registerLocked(args, account, home, names, missing, register, pat
     const entries = { 'claude-code': 'Claude Code: allow `mcp__lcu__js` and `mcp__lcu__js_reset`',
       codex: 'Codex: `approval_mode = "approve"` for the `js` and `js_reset` tools of `[mcp_servers.lcu]`',
       omp: 'Oh My Pi: `tools.approval` `js` and `js_reset` set to `allow`',
-      junie: 'Junie: allowlist `mcpTools` rules for exactly `lcu:js` and `lcu:js_reset`' };
+      junie: 'Junie: allowlist `mcpTools` rules for exactly `lcu:js` and `lcu:js_reset`',
+      antigravity: 'Antigravity CLI: `permissions.allow` rules for exactly `mcp(lcu/js)` and `mcp(lcu/js_reset)`' };
     const chosen = names.filter((name) => entries[name]).map((name) => entries[name]);
     say('Approval mode auto: add only LCU\'s own entries so its tools run without a per-call harness prompt' +
       (chosen.length ? `: ${chosen.join('; ')}` : '') + '. ' +
@@ -1219,6 +1237,19 @@ async function registerLocked(args, account, home, names, missing, register, pat
       !['y', 'yes'].includes((await seams.ask(JUNIE_CONTINUE_QUESTION)).trim().toLowerCase())) {
       names = names.filter((name) => name !== 'junie');
       say('Junie skipped; it will not be registered.');
+      if (!names.length) {
+        say('Cancelled; no agent configuration changed.');
+        return 'cancelled';
+      }
+    }
+  }
+  if (names.includes('antigravity') && !args.export) {
+    // Shown to the person only: when Antigravity cancels elicitation, the model is told to run `lcu apps allow`.
+    warn(ANTIGRAVITY_APPROVAL_WARNING);
+    if (!args.yes && seams.interactive() &&
+      !['y', 'yes'].includes((await seams.ask(ANTIGRAVITY_CONTINUE_QUESTION)).trim().toLowerCase())) {
+      names = names.filter((name) => name !== 'antigravity');
+      say('Antigravity skipped; it will not be registered.');
       if (!names.length) {
         say('Cancelled; no agent configuration changed.');
         return 'cancelled';
