@@ -13,20 +13,25 @@ import { declineAgentHostApp } from './host-guard.mjs';
 
 export const MODEL_TOOLS = new Set(['js', 'js_reset']);
 
-/** Top-level schema combinators that some hosts reject or drop a tool for; `mergedToolDescriptor` merges them. */
-export const TOP_LEVEL_COMBINATORS = ['oneOf', 'anyOf'];
+const TOP_LEVEL_COMBINATORS = ['oneOf', 'anyOf'];
+
+/** The top-level combinators of an original tool's schema that `mergedToolDescriptor` merges. */
+export function mergedCombinators(schema) {
+  return TOP_LEVEL_COMBINATORS.filter(key => Array.isArray(schema?.[key]));
+}
 
 /**
- * The descriptor a host gets for an original public tool when it cannot take a top-level `oneOf` or `anyOf`.
- * Claude Code leaves such a tool out, and Antigravity injects a required `toolSummary` field that no branch with
- * `additionalProperties: false` accepts, so every call fails validation. The original `js` lists its two argument
- * forms (`code`, or `completion_summary` alone) under a top-level `oneOf`. Such a schema becomes one object with
- * the properties of every form, requiring only what every form requires. Calls still reach the original server
- * unchanged, and it checks them against its own schema. Any other descriptor is returned as it is.
+ * The descriptor to list for an original public tool whose input schema has a top-level `oneOf` or `anyOf`.
+ * The original `js` lists its two argument forms (`code`, or `completion_summary` alone) as closed branches
+ * under a top-level `oneOf`. Hosts that rewrite a tool schema before sending it (Claude Code leaves such a tool
+ * out; Oh My Pi's intent field, OpenAI's strict conversion and Antigravity's required `toolSummary` field make
+ * every closed branch unsatisfiable) cannot use that shape. Such a schema becomes one object with the properties
+ * of every form, requiring only what every form requires. Calls still reach the original server unchanged, and it checks them against its own schema.
+ * Any other descriptor is returned as it is.
  */
 export function mergedToolDescriptor(tool) {
   const schema = tool.inputSchema;
-  const combinators = TOP_LEVEL_COMBINATORS.filter(key => Array.isArray(schema?.[key]));
+  const combinators = mergedCombinators(schema);
   if (combinators.length === 0) return tool;
   const inputSchema = { ...schema, type: 'object', properties: { ...schema.properties } };
   const required = new Set(Array.isArray(schema.required) ? schema.required : []);

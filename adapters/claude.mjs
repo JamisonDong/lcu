@@ -19,18 +19,15 @@ import {
   createApprovalLogger,
   createCallTracker,
   isMainModule,
-  mergedToolDescriptor as claudeToolDescriptor,
+  mergedCombinators,
+  mergedToolDescriptor,
   nativeAppApprovalOptions,
   nativeAppApprovalResponse,
   relayElicitation,
   restartFailedResult,
   selectedAppBuild,
-  TOP_LEVEL_COMBINATORS,
   TURN_END_TIMEOUT_MS,
 } from './client.mjs';
-
-/** The descriptor Claude gets for an original public tool (`mergedToolDescriptor`). */
-export { claudeToolDescriptor };
 import { crossTurnEnabled } from './cross-turn.mjs';
 import { openDiagnosticLog } from './diagnostics.mjs';
 import { declineAgentHostApp } from './host-guard.mjs';
@@ -124,12 +121,19 @@ const API_REJECTED_COMBINATORS = ['oneOf', 'anyOf', 'allOf'];
 function logPublicSchemas(log, upstreamTools, listedTools) {
   for (const tool of listedTools) {
     const original = upstreamTools.find(candidate => candidate.name === tool.name)?.inputSchema;
-    const merged = TOP_LEVEL_COMBINATORS.filter(key => Array.isArray(original?.[key]));
+    const merged = mergedCombinators(original);
     if (merged.length > 0) log.event('tool_schema_adapted', { tool: tool.name, merged });
     const left = API_REJECTED_COMBINATORS.filter(key => tool.inputSchema?.[key] !== undefined);
     if (left.length > 0) log.event('tool_schema_unsupported', { tool: tool.name, combinators: left });
   }
 }
+
+/**
+ * The descriptor Claude gets for an original public tool. Claude Code leaves out an MCP tool whose input
+ * schema has a top-level `oneOf` or `anyOf`, so the model would get `js_reset` and no `js`;
+ * `mergedToolDescriptor` lists such a schema as one object. Any other descriptor is returned as it is.
+ */
+export const claudeToolDescriptor = mergedToolDescriptor;
 
 function requireTurnContext(value) {
   if (!value || typeof value !== 'object' ||
