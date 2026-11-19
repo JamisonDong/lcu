@@ -628,6 +628,26 @@ test('Windows setup configures only the signed-in account, in a direct session, 
   assert.throws(() => check('--export', join(home, 'x')), /portable export is not implemented/);
 });
 
+test('Windows setup leaves out Junie and Antigravity: all and auto skip them, and naming one fails validation', (t) => {
+  const home = temporary(t);
+  mkdirSync(join(home, '.gemini/antigravity'), { recursive: true });
+  mkdirSync(join(home, '.junie'), { recursive: true });
+  override(t, setup.seams, 'which', () => null);
+  override(t, setup.seams, 'account', () => ({ name: 'Alice', uid: null, gid: null, home }));
+  const check = (...argv) => setup.validate(setup.parse(['--prefix', '/Users/alice/AppData/Local/LCU', ...argv]));
+  override(t, process, 'platform', 'win32');
+  const all = check('--agent', 'all').names;
+  assert.ok(all.includes('codex'));
+  assert.ok(!all.includes('antigravity') && !all.includes('junie'));
+  assert.deepEqual(setup.detect(home).filter((name) => ['junie', 'antigravity'].includes(name)), []);
+  assert.throws(() => check('--agent', 'antigravity'), /^Error: Antigravity cannot be set up on Windows yet\.$/);
+  assert.throws(() => check('--agent', 'agy'), /Antigravity cannot be set up on Windows yet/);
+  assert.throws(() => check('--agent', 'codex', '--agent', 'junie'), /Junie cannot be set up on Windows yet/);
+  override(t, process, 'platform', 'darwin');
+  assert.deepEqual(setup.detect(home).filter((name) => ['junie', 'antigravity'].includes(name)), ['junie', 'antigravity']);
+  assert.deepEqual(setup.supportedClients(), Object.keys(setup.CLIENTS));
+});
+
 test('Windows registrations name the stable lcu.cmd; setup itself starts the launcher on the current Node', (t) => {
   override(t, process, 'platform', 'win32');
   const prefix = '/Users/alice/AppData/Local/LCU';

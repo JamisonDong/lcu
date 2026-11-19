@@ -32,7 +32,8 @@ export function appPrerequisiteMessage(location, { alternateLocation = false } =
   return message;
 }
 
-// LCU names mapped to upstream installers; configuration formats belong upstream.
+// LCU names mapped to upstream installers; configuration formats belong upstream. `platforms` lists the only
+// platforms (`process.platform`) a client can be set up on; a client without it is set up on every platform.
 export const CLIENTS = {
   codex: { label: 'Codex', executable: 'codex', detectPath: '.codex', mcpAgent: 'codex' },
   'claude-code': { label: 'Claude Code', executable: 'claude', detectPath: '.claude.json', mcpAgent: 'claude-code' },
@@ -40,10 +41,17 @@ export const CLIENTS = {
   omp: { label: 'Oh My Pi', executable: 'omp', detectPath: '.omp', mcpAgent: '' },
   hermes: { label: 'Hermes', executable: 'hermes', detectPath: '.hermes', mcpAgent: '' },
   dsh: { label: 'DeepSeek Harness', executable: 'dsh', detectPath: '.dsh', mcpAgent: '' },
-  junie: { label: 'Junie', executable: 'junie', detectPath: '.junie', mcpAgent: '' },
+  // Junie's and Antigravity's relays meet their hooks on a Unix socket.
+  junie: { label: 'Junie', executable: 'junie', detectPath: '.junie', mcpAgent: '', platforms: ['darwin', 'linux'] },
   antigravity: { label: 'Antigravity', executable: 'agy',
-    detectPath: ['.gemini/antigravity', '.gemini/antigravity-cli', '.gemini/antigravity-ide', '.gemini/config'], mcpAgent: '' },
+    detectPath: ['.gemini/antigravity', '.gemini/antigravity-cli', '.gemini/antigravity-ide', '.gemini/config'], mcpAgent: '',
+    platforms: ['darwin', 'linux'] },
 };
+const PLATFORM_NAMES = { darwin: 'macOS', linux: 'Linux', win32: 'Windows' };
+/** Whether client `name` can be set up on this platform. */
+const supportedHere = (name) => !CLIENTS[name].platforms || CLIENTS[name].platforms.includes(process.platform);
+/** The clients that can be set up on this platform: what `all` and `auto` choose from. */
+export const supportedClients = () => Object.keys(CLIENTS).filter(supportedHere);
 export const ALIASES = { claude: 'claude-code', 'oh-my-pi': 'omp', 'hermes-agent': 'hermes', 'deepseek-harness': 'dsh', agy: 'antigravity' };
 // Harnesses whose native registration needs their own executable; Codex and Claude Code register through
 // add-mcp and their config files, and Junie and Antigravity through their config files, without the CLI installed.
@@ -891,10 +899,15 @@ export function validate(args) {
   if (unknown.length) {
     throw new Error(`Unknown agent: ${unknown.join(', ')}. Run lcu setup --list-agents, or use --export for a custom client.`);
   }
+  const unsupported = names.filter((name) => CLIENTS[name] && !supportedHere(name));
+  if (unsupported.length) {
+    throw new Error(`${unsupported.map((name) => CLIENTS[name].label).join(', ')} cannot be set up on ` +
+      `${PLATFORM_NAMES[process.platform] ?? process.platform} yet.`);
+  }
   if ((names.includes('auto') || names.includes('all')) && names.length > 1) {
     throw new Error('Use --agent all or --agent auto alone, or select explicit agent IDs.');
   }
-  if (names.length === 1 && names[0] === 'all') names = Object.keys(CLIENTS);
+  if (names.length === 1 && names[0] === 'all') names = supportedClients();
   if (!(names.length === 1 && names[0] === 'auto')) validateAgentScope(names, args.scope);
   if (args['dsh-profile'] !== undefined) {
     if (args.export) throw new Error('--dsh-profile configures DeepSeek Harness; it cannot be combined with --export.');
@@ -912,6 +925,7 @@ function validateAgentScope(names, scope) {
 }
 
 export const detect = (home) => Object.entries(CLIENTS)
+  .filter(([name]) => supportedHere(name))
   .filter(([name, client]) => (name === 'dsh' ? dshExecutable(home) : seams.which(client.executable)) ||
     (Array.isArray(client.detectPath) ? client.detectPath : [client.detectPath]).some((path) => existsSync(join(home, path))))
   .map(([name]) => name);
@@ -919,14 +933,14 @@ export const detect = (home) => Object.entries(CLIENTS)
 async function chooseAgents(home) {
   const detected = detect(home);
   say('Select one or more agents for this account (comma-separated IDs).');
-  for (const [name, client] of Object.entries(CLIENTS)) say(`  ${name.padEnd(16)} ${client.label}${detected.includes(name) ? ' [detected]' : ''}`);
+  for (const name of supportedClients()) say(`  ${name.padEnd(16)} ${CLIENTS[name].label}${detected.includes(name) ? ' [detected]' : ''}`);
   say('Use all for every supported client, including those not installed yet.',
     'For other clients, cancel and use --export /absolute/new/plugin-directory.');
   let names = [...new Set((await seams.ask('Agents: ')).trim().split(',').map((name) => name.trim()).filter(Boolean)
     .map((name) => ALIASES[name] ?? name))];
-  if (names.length === 1 && names[0] === 'all') return Object.keys(CLIENTS);
+  if (names.length === 1 && names[0] === 'all') return supportedClients();
   if (names.length === 1 && names[0] === 'auto') names = detected;
-  if (!names.length || names.some((name) => !CLIENTS[name])) throw new Error('Choose supported agent IDs, or use --export for a custom client.');
+  if (!names.length || names.some((name) => !CLIENTS[name] || !supportedHere(name))) throw new Error('Choose supported agent IDs, or use --export for a custom client.');
   return names;
 }
 
@@ -1065,7 +1079,7 @@ export async function main(argv, { configure: register = configure, crossTurn = 
     return 0;
   }
   if (args['list-agents']) {
-    for (const [name, client] of Object.entries(CLIENTS)) say(`${name.padEnd(16)} ${client.label} (${agentScopes(name)})`);
+    for (const name of supportedClients()) say(`${name.padEnd(16)} ${CLIENTS[name].label} (${agentScopes(name)})`);
     say('Custom clients: --export /absolute/new/plugin-directory');
     return 0;
   }
